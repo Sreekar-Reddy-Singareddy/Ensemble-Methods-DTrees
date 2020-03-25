@@ -8,6 +8,9 @@ from sklearn.metrics import confusion_matrix
 import graphviz
 import sys
 import random
+from sklearn.tree import  DecisionTreeClassifier
+from sklearn.ensemble import BaggingClassifier
+from sklearn.ensemble import AdaBoostClassifier
 
 # Partition Function:
 # -receives the dataframe and creates a dictionary of attribute-value pairs
@@ -449,71 +452,20 @@ def main():
     ## end
 
 # The main execution of the assignment begins here
-def pro_assign_2():
-    data_set_name = "monks-1"
-    data_columns_to_drop = []
-    data_class_column = 1
+def pro_assign_2_bagging(depths=[], trees=[]):
+    data = read_data("monks-1")
+    train_df = data[0]
+    test_x = data[1]
+    test_y = data[2]
 
-    # Read the data files
-    train_data_path = "./{}.train".format(data_set_name)
-    test_data_path = "./{}.test".format(data_set_name)
-    train_df = pd.read_csv(train_data_path, delimiter = ",", header=None)
-    test_df = pd.read_csv(test_data_path, delimiter = ",", header=None)
-
-    # Drop the unwanted columns
-    for c in data_columns_to_drop:
-        del train_df[c-1]
-        del test_df[c-1]
-
-    # Extract the class column
-    train_y = train_df[data_class_column-1] #  Bruises column data is stored here - Train
-    del train_df[data_class_column-1]
-    test_y = test_df[data_class_column-1] #  Bruises column data is stored here - Test
-    del test_df[data_class_column-1]
-
-    # Send the training data to the bagging algorithm
-    bagging(train_df, train_y, 3, 10)
-
-# The main execution of the assignment begins here
-def pro_assign_2_auto(depths=[], trees=[]):
-    data_set_name = "monks-1"
-    data_columns_to_drop = []
-    data_class_column = 1
-
-    # Read the data files
-    train_data_path = "./data/{}.train".format(data_set_name)
-    test_data_path = "./data/{}.test".format(data_set_name)
-    train_df = pd.read_csv(train_data_path, delimiter=",", header=None)
-    test_df = pd.read_csv(test_data_path, delimiter=",", header=None)
-    test_y = list(test_df[data_class_column-1])
-    del test_df[data_class_column - 1]
-
-    # Drop the unwanted columns
-    for c in data_columns_to_drop:
-        del train_df[c - 1]
-        del test_df[c - 1]
-
-    output = open("./output.txt", "w")
     for depth in depths:
         for tree_len in trees:
             # Send the training data to the bagging algorithm
             all_trees = bagging(train_df, class_column=1, max_depth=depth, num_trees=tree_len)
 
             # Predict the test set with all the trees
-            predictions = predict_test_set(test_df, type="bagging_tree", h_ens=all_trees)
-
-            # Compute the error and accuracy
-            error = compute_error(test_y, predictions)
-            print("Error: ", round(error * 100, 2), file=output)
-            print("Accuracy: ", round((1 - error) * 100, 2), file=output)
-
-            # Gets the confusion matrix
-            confusion_matrix = get_confusion_matrix(test_y, predictions)
-            print("=================== Confuction Matrix ==================", file=output)
-            print(confusion_matrix[0], file=output)
-            print(confusion_matrix[1], file=output)
-
-    output.close()
+            predictions = predict_test_set(test_x, type="bagging_tree", h_ens=all_trees)
+            print_report(predictions, test_y, depth=depth, trees=tree_len)
 
 # The main execution of the assignment begins here
 def pro_assign_2_boosting(depths=[], trees=[]):
@@ -553,10 +505,64 @@ def pro_assign_2_boosting(depths=[], trees=[]):
             print(confusion_matrix[0])
             print(confusion_matrix[1])
 
+# Scikit learn bagging
+def scikit_bagging(depths=[], trees=[]):
+    data = read_data("monks-1")
+    train_df = data[0]
+    test_x = data[1]
+    test_y = data[2]
+
+    for d in depths:
+        for t in trees:
+            dtree = DecisionTreeClassifier(max_depth=d)
+            clf = BaggingClassifier(base_estimator= dtree,n_estimators=t, bootstrap=True).fit(train_df.drop(0,1), train_df[0])
+            pred = clf.predict(test_x)
+            print_report(pred, test_y, depth=d, trees=t)
+
+# Scikit learn boosting
+def scikit_boosting(depths=[], stumps=[]):
+    data = read_data("monks-1")
+    train_df = data[0]
+    test_x = data[1]
+    test_y = data[2]
+
+    for d in depths:
+        for s in stumps:
+            dtree = DecisionTreeClassifier(max_depth=d)
+            clf = AdaBoostClassifier(base_estimator=dtree, n_estimators=s).fit(train_df.drop(0,1), train_df[0])
+            pred = clf.predict(test_x)
+            print_report(pred, test_y, depth=d, trees=s)
+
+def print_report(y_pred, y_true, depth=0, trees=1):
+    err = compute_error(y_true, y_pred)
+    acc = 1 - err
+    print("========================= Depth: {} and Trees: {} ==============================".format(depth, trees))
+    print("Error   : ", round(err * 100, 2))
+    print("Accuracy: ", round(acc * 100, 2))
+    print("C Matrix: \n", confusion_matrix(y_true, y_pred))
+    print("========================= *********************** ==============================".format(depth, trees))
+
+def read_data(data_set_name, data_class_column=1, data_columns_to_drop=[]):
+    # Read the data files
+    train_data_path = "./data/{}.train".format(data_set_name)
+    test_data_path = "./data/{}.test".format(data_set_name)
+    train_df = pd.read_csv(train_data_path, delimiter=",", header=None)
+    test_df = pd.read_csv(test_data_path, delimiter=",", header=None)
+    test_y = list(test_df[data_class_column - 1])
+    del test_df[data_class_column - 1]
+
+    # Drop the unwanted columns
+    for c in data_columns_to_drop:
+        del train_df[c - 1]
+        del test_df[c - 1]
+
+    return (train_df, test_df, test_y)
 
 if __name__ == "__main__":
     # main()
     # pro_assign_2()
-    # pro_assign_2_auto(depths=[3,5],trees=[10,20])
-    pro_assign_2_boosting([1,2], [20,40])
+    # pro_assign_2_bagging(depths=[3,5],trees=[10,20])
+    # pro_assign_2_boosting([1,2], [20,40])
+    scikit_bagging([3,5], [10,20])
+    # scikit_boosting([1,2], [20,40])
 
