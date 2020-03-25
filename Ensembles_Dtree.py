@@ -29,12 +29,23 @@ def partition(x):
 # if proportion of one class in a split subset is 0, return 0 for that entropy ( homogenous class)
 # else calculate the entropy  - Summation(Pi*log(Pi) (i=0,1)
 # returns value to the mutual_information function
-def entropy(y):
+def entropy(y, dist=None):
     if len(y) == 0:
         return 0
     else:
-        p0 = len([c for c in y if c == 0]) / len(y)
-        p1 = 1 - p0
+        p0 = p1 = 0
+        if dist is None:
+            p0 = len([c for c in y if c == 0]) / len(y)
+            p1 = 1 - p0
+        else:
+            for index in y.index:
+                if y[index] == 0:
+                    p0 += dist[index]
+                else:
+                    p1 += dist[index]
+            p0 = p0/(p0+p1)
+            p1 = 1 - p0
+
         if p0 == 0.0 or p0 == 1.0:
             return 0
         else:
@@ -45,15 +56,26 @@ def entropy(y):
 # 2. receives the present subset of the data, on which entropy and mutual information is to be evaluated
 # 3. receives entropy before and after  binary split, calculates weighted entropy after split
 # 4. finally subtracts before - weighted entropy to return mutual information
+def mutual_information(indices, df, hasDist):
+    e_root = 0
+    if hasDist:
+        e_root = entropy(df['class'], dist=df["distribution"])
+    else :
+        e_root = entropy(df['class'])
 
-def mutual_information(x, y):
-    e_root = entropy(y['class'])
-    y_true = y[y.index.isin(x)]
-    y_false = y[~y.index.isin(x)]
-    e_true = entropy(y_true['class'])
-    e_false = entropy(y_false['class'])
-    e_tot = (len(y_true) / len(y)) * e_true + (len(y_false) / len(y)) * e_false
-    return e_root - e_tot
+    df_true = df[df.index.isin(indices)]
+    df_false = df[~df.index.isin(indices)]
+
+    e_true = 0; e_false = 0
+    if hasDist:
+        e_true = entropy(df_true['class'], dist=df["distribution"])
+        e_false = entropy(df_false['class'], dist=df["distribution"])
+    else:
+        e_true = entropy(df_true['class'])
+        e_false = entropy(df_false['class'])
+
+    e_tot = (len(df_true) / len(df)) * e_true + (len(df_false) / len(df)) * e_false
+    return abs(e_root - e_tot)
 
 # dectree: this is main binary decision tree recursion implementation code
 # terminal conditions are following ID3 algorithm:
@@ -62,8 +84,7 @@ def mutual_information(x, y):
 #     -if max depth has reached, return mode  class the left over data
 #     -if no data is left to be split, return prior to split mode of class ( don't recursively call anymore)
 # final output is a nested dictionary representing the decision tree
-
-def dectree(df, dict, depth):
+def dectree(df, dict, depth, hasDist):
     if len(dict.keys()) == 0 or len(df['class'].unique()) == 1 or depth == 0:
         if len(df.loc[df['class'] == 1]) >= len(df.loc[df['class'] == 0]):
             return 1
@@ -73,7 +94,7 @@ def dectree(df, dict, depth):
         mutinfo = {}
         for k in dict.keys():
             node = dict[k]
-            mutinfo[k] = mutual_information(node, df)
+            mutinfo[k] = mutual_information(node, df, hasDist)
         splitnode = ()
         Gain = 0
         for k in mutinfo.keys():
@@ -90,14 +111,14 @@ def dectree(df, dict, depth):
             else:
                 return 0
         else:
-            left_branch = dectree(df.loc[df[feature] == value], dict, depth)  # Recursion Left
+            left_branch = dectree(df.loc[df[feature] == value], dict, depth, hasDist)  # Recursion Left
         if len(df.loc[df[feature] != value]) == 0:
             if len(df.loc[df['class'] == 1]) >= len(df.loc[df['class'] == 0]):
                 return 1
             else:
                 return 0
         else:
-            right_branch = dectree(df.loc[df[feature] != value], dict, depth)  # Recursion Right
+            right_branch = dectree(df.loc[df[feature] != value], dict, depth, hasDist)  # Recursion Right
         l_tuple = (feature, value, True)
         r_tuple = (feature, value, False)
         node_dict = {l_tuple: left_branch, r_tuple: right_branch}
@@ -110,8 +131,7 @@ def dectree(df, dict, depth):
 # this function calls the partition function to create the dictionary of attribute value pairs
 # it calls the main decision tree function (dectree) with all required arguments
 # receives and returns the decision tree (nested dictionary) created to main function
-
-def id3(x, y, attribute_value=None, depth=0, max_depth=1):
+def id3(x, y, attribute_value=None, depth=0, max_depth=1, hasDist=False):
     # x.insert(loc=0, column='class', value=y)
     try:
         x.insert(loc=0, column='class', value=y)
@@ -120,16 +140,17 @@ def id3(x, y, attribute_value=None, depth=0, max_depth=1):
     depth = max_depth
     columns = list(x)
     del (columns[0])
+    del (columns[len(columns)-1])
     dict_all = {}
     for c in columns:
         col = pd.DataFrame((x[c].unique()))
-        dict_all = partition(x)
-    return dectree(x, dict_all, depth)
+        if hasDist: dict_all = partition(x.drop("distribution",1))
+        else: dict_all = partition(x)
+    return dectree(x, dict_all, depth, hasDist)
 
 # predict_example function: It takes in one example at a time and traverses through the binary decision tree to
 #                          reach the end node. Based on the end node reached, the mode class of the node is the
 #                          predicted class of this example. It returns the predicted class to main function
-
 def predict_example(x, tree):
     all_keys = list(tree.keys())
     attribute = all_keys[0][0]
@@ -242,6 +263,49 @@ def create_bootstraps (df, k, class_column=1):
             # y_k = y_k.append(rand_y, ignore_index=True)
     return bootstraps
 
+# This method accepts train set and num of ensemble trees
+# to train. Returns an array of ensembles [(alpha_i, hyp_i)]
+def boosting (data, max_depth, num_stumps, class_column=1):
+    y = data[class_column-1]
+    x = data.drop(class_column-1, 1)
+    sample_size = len(list(x.index))
+    d_i = [1/sample_size]*sample_size # The initial distribution
+
+    ensembles = [] # Array of ensembles [(alpha_i, hyp_i)]
+    for i in range(0,num_stumps):
+        x.insert(loc=len(x.columns), column="distribution", value=d_i)
+        h_i = id3(x,y,max_depth=max_depth, hasDist=True) # ith decision tree
+        d_i = list(x["distribution"])
+        del x["distribution"]
+        y_pred = predict_test_set(x, type="tree", h_tree=h_i)
+        err_i = compute_error_boosting(y, y_pred, d_i) # error of ith decision tree
+        alpha_i = get_hypothesis_weight(err_i) # weight of ith decision tree
+        d_i = get_new_distribution(d_i, alpha_i, y, y_pred) # new distribution for next dtree
+        ensembles.append((alpha_i, h_i))
+    return ensembles
+
+def compute_error_boosting (y_true, y_pred, d_i):
+    total = 0; error = 0
+    for i in range(0, len(y_true)):
+        if (y_pred[i] != y_true[i]):
+            error += d_i[i]
+    return error/sum(d_i)
+
+# This method takes error and returns the alpha value
+def get_hypothesis_weight(error):
+    a = (1-error)/error
+    return 0.5*math.log(a)
+
+# This method computes new distribution based on the current predictions
+def get_new_distribution(prev_dis, alpha, y_true, y_pred):
+    new_dis = [-1]*len(prev_dis)
+    for i in range(0, len(prev_dis)):
+        if y_true[i] == y_pred[i]: # Decrease the weight for correct prediction
+            new_dis[i] = prev_dis[i]*math.exp(-alpha)
+        else: # Increase the weight for incorrect prediction
+            new_dis[i] = prev_dis[i]*math.exp(alpha)
+    return new_dis
+
 # Takes the test set and computes the prediction.
 # Returns the array of BEST predictions as combined
 # by the ensemble hypothesis.
@@ -256,11 +320,15 @@ def predict_test_set(test_x, type, h_ens=[], h_tree=None):
     for i in range(0, num_of_examples):
         preds_i = []
         for h in h_ens:
-            preds_i.append(h[0] * predict_example(test_x.iloc[i], h[1]))
+            pred = predict_example(test_x.iloc[i], h[1])
+            if (type == "boosting_tree" and pred == 0): preds_i.append(h[0] * -1)
+            else: preds_i.append(h[0] * pred)
         if (type == "bagging_tree"):
             try :predictions.append(st.mode(preds_i)) # Final prediction of bagging
             except: predictions.append(1) # Tie breaking
-        elif (type == "boosting_tree"): pass
+        elif (type == "boosting_tree"):
+            if sum(preds_i) > 0: predictions.append(1)
+            else: predictions.append(0)
         elif (type == "tree"): predictions.append(predict_example(test_x.iloc[i], h_tree)) # Prediction using simple tree
     return predictions
 
@@ -413,8 +481,8 @@ def pro_assign_2_auto(depths=[], trees=[]):
     data_class_column = 1
 
     # Read the data files
-    train_data_path = "./{}.train".format(data_set_name)
-    test_data_path = "./{}.test".format(data_set_name)
+    train_data_path = "./data/{}.train".format(data_set_name)
+    test_data_path = "./data/{}.test".format(data_set_name)
     train_df = pd.read_csv(train_data_path, delimiter=",", header=None)
     test_df = pd.read_csv(test_data_path, delimiter=",", header=None)
     test_y = list(test_df[data_class_column-1])
@@ -447,8 +515,48 @@ def pro_assign_2_auto(depths=[], trees=[]):
 
     output.close()
 
+# The main execution of the assignment begins here
+def pro_assign_2_boosting(depths=[], trees=[]):
+    data_set_name = "mushroom"
+    data_columns_to_drop = []
+    data_class_column = 1
+
+    # Read the data files
+    train_data_path = "./data/{}.train".format(data_set_name)
+    test_data_path = "./data/{}.test".format(data_set_name)
+    train_df = pd.read_csv(train_data_path, delimiter=",", header=None)
+    test_df = pd.read_csv(test_data_path, delimiter=",", header=None)
+    test_y = list(test_df[data_class_column-1])
+    del test_df[data_class_column - 1]
+
+    # Drop the unwanted columns
+    for c in data_columns_to_drop:
+        del train_df[c - 1]
+        del test_df[c - 1]
+
+    for depth in depths:
+        for tree in trees:
+            # Boosting algorithm
+            all_trees = boosting(train_df, depth, tree, data_class_column)
+
+            # Predict the test set with all the trees
+            predictions = predict_test_set(test_df, type="boosting_tree", h_ens=all_trees)
+
+            # Compute the error and accuracy
+            error = compute_error(test_y, predictions)
+            print("Error: ", round(error * 100, 2))
+            print("Accuracy: ", round((1 - error) * 100, 2))
+
+            # Gets the confusion matrix
+            confusion_matrix = get_confusion_matrix(test_y, predictions)
+            print("=================== Confuction Matrix ==================")
+            print(confusion_matrix[0])
+            print(confusion_matrix[1])
+
+
 if __name__ == "__main__":
     # main()
     # pro_assign_2()
-    pro_assign_2_auto(depths=[3,5],trees=[10,20])
+    # pro_assign_2_auto(depths=[3,5],trees=[10,20])
+    pro_assign_2_boosting([1,2], [20,40])
 
