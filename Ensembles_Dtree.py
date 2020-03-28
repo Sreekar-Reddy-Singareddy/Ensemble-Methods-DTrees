@@ -71,14 +71,14 @@ def mutual_information(indices, df, hasDist):
 
     e_true = 0; e_false = 0
     if hasDist:
-        e_true = entropy(df_true['class'], dist=df["distribution"])
-        e_false = entropy(df_false['class'], dist=df["distribution"])
+        e_true = entropy(df_true['class'], dist=df_true["distribution"])
+        e_false = entropy(df_false['class'], dist=df_false["distribution"])
     else:
         e_true = entropy(df_true['class'])
         e_false = entropy(df_false['class'])
 
     e_tot = (len(df_true) / len(df)) * e_true + (len(df_false) / len(df)) * e_false
-    return abs(e_root - e_tot)
+    return e_root - e_tot
 
 # dectree: this is main binary decision tree recursion implementation code
 # terminal conditions are following ID3 algorithm:
@@ -134,6 +134,7 @@ def dectree(df, dict, depth, hasDist):
 # this function calls the partition function to create the dictionary of attribute value pairs
 # it calls the main decision tree function (dectree) with all required arguments
 # receives and returns the decision tree (nested dictionary) created to main function
+# "hasDist" will be true only for the boosting algorithm. For the rest, no need to pass this value.
 def id3(x, y, attribute_value=None, depth=0, max_depth=1, hasDist=False):
     # x.insert(loc=0, column='class', value=y)
     try:
@@ -143,10 +144,11 @@ def id3(x, y, attribute_value=None, depth=0, max_depth=1, hasDist=False):
     depth = max_depth
     columns = list(x)
     del (columns[0])
-    del (columns[len(columns)-1])
+    if (hasDist): del (columns[len(columns)-1]) # Delete the distribution column if it exists
     dict_all = {}
     for c in columns:
         col = pd.DataFrame((x[c].unique()))
+        dict_all = {}
         if hasDist: dict_all = partition(x.drop("distribution",1))
         else: dict_all = partition(x)
     return dectree(x, dict_all, depth, hasDist)
@@ -278,10 +280,12 @@ def boosting (data, max_depth, num_stumps, class_column=1):
     for i in range(0,num_stumps):
         x.insert(loc=len(x.columns), column="distribution", value=d_i)
         h_i = id3(x,y,max_depth=max_depth, hasDist=True) # ith decision tree
+        print("*** --- >",h_i)
         d_i = list(x["distribution"])
         del x["distribution"]
         y_pred = predict_test_set(x, type="tree", h_tree=h_i)
-        err_i = compute_error_boosting(y, y_pred, d_i) # error of ith decision tree
+        err_i = round(compute_error_boosting(y, y_pred, d_i),3) # error of ith decision tree
+        print("Error --- > ", err_i)
         alpha_i = get_hypothesis_weight(err_i) # weight of ith decision tree
         d_i = get_new_distribution(d_i, alpha_i, y, y_pred) # new distribution for next dtree
         ensembles.append((alpha_i, h_i))
@@ -304,9 +308,15 @@ def get_new_distribution(prev_dis, alpha, y_true, y_pred):
     new_dis = [-1]*len(prev_dis)
     for i in range(0, len(prev_dis)):
         if y_true[i] == y_pred[i]: # Decrease the weight for correct prediction
-            new_dis[i] = prev_dis[i]*math.exp(-alpha)
+            new_dis[i] = round(prev_dis[i]*math.exp(-alpha),10)
         else: # Increase the weight for incorrect prediction
-            new_dis[i] = prev_dis[i]*math.exp(alpha)
+            new_dis[i] = round(prev_dis[i]*math.exp(alpha), 10)
+
+    # Normalise the distribution
+    total = sum(new_dis)
+    for i in range(0, len(prev_dis)):
+        new_dis[i] = round(new_dis[i]/total, 10)
+
     return new_dis
 
 # Takes the test set and computes the prediction.
@@ -453,7 +463,7 @@ def main():
 
 # The main execution of the assignment begins here
 def pro_assign_2_bagging(depths=[], trees=[]):
-    data = read_data("monks-1")
+    data = read_data("mushroom")
     train_df = data[0]
     test_x = data[1]
     test_y = data[2]
@@ -468,7 +478,7 @@ def pro_assign_2_bagging(depths=[], trees=[]):
             print_report(predictions, test_y, depth=depth, trees=tree_len)
 
 # The main execution of the assignment begins here
-def pro_assign_2_boosting(depths=[], trees=[]):
+def own_boosting(depths=[], trees=[]):
     data_set_name = "mushroom"
     data_columns_to_drop = []
     data_class_column = 1
@@ -495,19 +505,11 @@ def pro_assign_2_boosting(depths=[], trees=[]):
             predictions = predict_test_set(test_df, type="boosting_tree", h_ens=all_trees)
 
             # Compute the error and accuracy
-            error = compute_error(test_y, predictions)
-            print("Error: ", round(error * 100, 2))
-            print("Accuracy: ", round((1 - error) * 100, 2))
-
-            # Gets the confusion matrix
-            confusion_matrix = get_confusion_matrix(test_y, predictions)
-            print("=================== Confuction Matrix ==================")
-            print(confusion_matrix[0])
-            print(confusion_matrix[1])
+            print_report(predictions, test_y, depth=depth, trees=tree)
 
 # Scikit learn bagging
 def scikit_bagging(depths=[], trees=[]):
-    data = read_data("monks-1")
+    data = read_data("monks-2")
     train_df = data[0]
     test_x = data[1]
     test_y = data[2]
@@ -562,7 +564,7 @@ if __name__ == "__main__":
     # main()
     # pro_assign_2()
     # pro_assign_2_bagging(depths=[3,5],trees=[10,20])
-    # pro_assign_2_boosting([1,2], [20,40])
-    scikit_bagging([3,5], [10,20])
+    own_boosting([1,2], [20,40])
+    # scikit_bagging([3,5], [10,20])
     # scikit_boosting([1,2], [20,40])
 
