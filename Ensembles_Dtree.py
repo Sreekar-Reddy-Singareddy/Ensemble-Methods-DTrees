@@ -78,7 +78,7 @@ def mutual_information(indices, df, hasDist):
         e_false = entropy(df_false['class'])
 
     e_tot = (len(df_true) / len(df)) * e_true + (len(df_false) / len(df)) * e_false
-    return e_root - e_tot
+    return abs(e_root - e_tot)
 
 # dectree: this is main binary decision tree recursion implementation code
 # terminal conditions are following ID3 algorithm:
@@ -280,12 +280,12 @@ def boosting (data, max_depth, num_stumps, class_column=1):
     for i in range(0,num_stumps):
         x.insert(loc=len(x.columns), column="distribution", value=d_i)
         h_i = id3(x,y,max_depth=max_depth, hasDist=True) # ith decision tree
-        print("*** --- >",h_i)
+        # print("*** --- >",h_i)
         d_i = list(x["distribution"])
         del x["distribution"]
         y_pred = predict_test_set(x, type="tree", h_tree=h_i)
         err_i = round(compute_error_boosting(y, y_pred, d_i),3) # error of ith decision tree
-        print("Error --- > ", err_i)
+        # print("Error --- > ", err_i)
         alpha_i = get_hypothesis_weight(err_i) # weight of ith decision tree
         d_i = get_new_distribution(d_i, alpha_i, y, y_pred) # new distribution for next dtree
         ensembles.append((alpha_i, h_i))
@@ -300,6 +300,7 @@ def compute_error_boosting (y_true, y_pred, d_i):
 
 # This method takes error and returns the alpha value
 def get_hypothesis_weight(error):
+    if error == 0: return 1
     a = (1-error)/error
     return 0.5*math.log(a)
 
@@ -479,7 +480,7 @@ def pro_assign_2_bagging(depths=[], trees=[]):
 
 # The main execution of the assignment begins here
 def own_boosting(depths=[], trees=[]):
-    data_set_name = "mushroom"
+    data_set_name = "monks-1"
     data_columns_to_drop = []
     data_class_column = 1
 
@@ -564,7 +565,7 @@ if __name__ == "__main__":
     # main()
     # pro_assign_2()
     # pro_assign_2_bagging(depths=[3,5],trees=[10,20])
-    own_boosting([1,2], [20,40])
+    own_boosting([3,5], [20,40])
     # scikit_bagging([3,5], [10,20])
     # scikit_boosting([1,2], [20,40])
 
