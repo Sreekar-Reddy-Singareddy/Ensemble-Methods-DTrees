@@ -1,5 +1,6 @@
 import numpy as np
 import statistics as st
+import time
 import pandas as pd
 import math
 import matplotlib.pyplot as plt
@@ -11,6 +12,11 @@ import random
 from sklearn.tree import  DecisionTreeClassifier
 from sklearn.ensemble import BaggingClassifier
 from sklearn.ensemble import AdaBoostClassifier
+
+# ==== Project Team ====
+# SXS190008 - Sreekar
+# SXC190070 - Subhajit
+# ======================
 
 # Partition Function:
 # -receives the dataframe and creates a dictionary of attribute-value pairs
@@ -32,6 +38,27 @@ def partition(x):
 # if proportion of one class in a split subset is 0, return 0 for that entropy ( homogenous class)
 # else calculate the entropy  - Summation(Pi*log(Pi) (i=0,1)
 # returns value to the mutual_information function
+# def entropy(y, dist=None):
+#     if len(y) == 0:
+#         return 0
+#     else:
+#         p0 = p1 = 0
+#         if dist is None:
+#             p0 = len([c for c in y if c == 0]) / len(y)
+#             p1 = 1 - p0
+#         else:
+#             for index in y.index:
+#                 if y[index] == 0:
+#                     p0 += dist[index]
+#                 else:
+#                     p1 += dist[index]
+#             p0 = p0/(p0+p1)
+#             p1 = 1 - p0
+#
+#         if p0 == 0.0 or p0 == 1.0:
+#             return 0
+#         else:
+#             return -((p0 * math.log(p0, 2)) + (p1 * math.log(p1, 2)))
 def entropy(y, dist=None):
     if len(y) == 0:
         return 0
@@ -41,14 +68,11 @@ def entropy(y, dist=None):
             p0 = len([c for c in y if c == 0]) / len(y)
             p1 = 1 - p0
         else:
-            for index in y.index:
-                if y[index] == 0:
-                    p0 += dist[index]
-                else:
-                    p1 += dist[index]
-            p0 = p0/(p0+p1)
+            df = pd.DataFrame(list(zip(y, dist)),columns=['class', 'dist'])
+            s0=df.loc[df['class'] == 0, 'dist'].sum()
+            s1=df.loc[df['class'] == 1, 'dist'].sum()
+            p0 = s0/(s0+s1)
             p1 = 1 - p0
-
         if p0 == 0.0 or p0 == 1.0:
             return 0
         else:
@@ -78,7 +102,7 @@ def mutual_information(indices, df, hasDist):
         e_false = entropy(df_false['class'])
 
     e_tot = (len(df_true) / len(df)) * e_true + (len(df_false) / len(df)) * e_false
-    return abs(e_root - e_tot)
+    return e_root - e_tot
 
 # dectree: this is main binary decision tree recursion implementation code
 # terminal conditions are following ID3 algorithm:
@@ -176,12 +200,17 @@ def predict_example(x, tree):
         return predict_example(x, subtree)
 
 # compute_error function : takes in predicted and actual class columns and computes the mis-classification proportion
+# def compute_error(y_true, y_pred):
+#     correct = 0
+#     for i in range(len(y_pred)):
+#         if y_pred[i] == y_true[i]:
+#             correct += 1
+#     return (1 - correct / len(y_true))
 def compute_error(y_true, y_pred):
-    correct = 0
-    for i in range(len(y_pred)):
-        if y_pred[i] == y_true[i]:
-            correct += 1
-    return (1 - correct / len(y_true))
+    y_t = np.array(y_true)
+    y_p = np.array(y_pred)
+    error = np.sum(abs(y_t - y_p)) / len(y_true)
+    return error
 
 # visualize function: provided visualization function to display the decision tree in tree structure
 def visualize(tree, depth=0):
@@ -291,33 +320,45 @@ def boosting (data, max_depth, num_stumps, class_column=1):
         ensembles.append((alpha_i, h_i))
     return ensembles
 
+# def compute_error_boosting (y_true, y_pred, d_i):
+#     total = 0; error = 0
+#     for i in range(0, len(y_true)):
+#         if (y_pred[i] != y_true[i]):
+#             error += d_i[i]
+#     return error/sum(d_i)
 def compute_error_boosting (y_true, y_pred, d_i):
-    total = 0; error = 0
-    for i in range(0, len(y_true)):
-        if (y_pred[i] != y_true[i]):
-            error += d_i[i]
-    return error/sum(d_i)
+    y_t = np.array(y_true)
+    y_p = np.array(y_pred)
+    error = np.sum(abs(y_t - y_p) * d_i) / sum(d_i)
+    return error
 
 # This method takes error and returns the alpha value
 def get_hypothesis_weight(error):
-    if error == 0: return 1
     a = (1-error)/error
     return 0.5*math.log(a)
 
 # This method computes new distribution based on the current predictions
+# def get_new_distribution(prev_dis, alpha, y_true, y_pred):
+#     print(type(prev_dis))
+#     new_dis = [-1]*len(prev_dis)
+#     for i in range(0, len(prev_dis)):
+#         if y_true[i] == y_pred[i]: # Decrease the weight for correct prediction
+#             new_dis[i] = round(prev_dis[i]*math.exp(-alpha),10)
+#         else: # Increase the weight for incorrect prediction
+#             new_dis[i] = round(prev_dis[i]*math.exp(alpha), 10)
+#
+#     # Normalise the distribution
+#     total = sum(new_dis)
+#     for i in range(0, len(prev_dis)):
+#         new_dis[i] = round(new_dis[i]/total, 10)
+#
+#     return new_dis
 def get_new_distribution(prev_dis, alpha, y_true, y_pred):
-    new_dis = [-1]*len(prev_dis)
-    for i in range(0, len(prev_dis)):
-        if y_true[i] == y_pred[i]: # Decrease the weight for correct prediction
-            new_dis[i] = round(prev_dis[i]*math.exp(-alpha),10)
-        else: # Increase the weight for incorrect prediction
-            new_dis[i] = round(prev_dis[i]*math.exp(alpha), 10)
-
-    # Normalise the distribution
-    total = sum(new_dis)
-    for i in range(0, len(prev_dis)):
-        new_dis[i] = round(new_dis[i]/total, 10)
-
+    y_t=np.array(y_true)
+    y_p = np.array(y_pred)
+    p_dis = np.array(prev_dis)
+    n_dis=p_dis*np.exp((-1 + 2* abs(y_t-y_p))*alpha)
+    new_dis=n_dis.tolist()
     return new_dis
 
 # Takes the test set and computes the prediction.
@@ -346,124 +387,8 @@ def predict_test_set(test_x, type, h_ens=[], h_tree=None):
         elif (type == "tree"): predictions.append(predict_example(test_x.iloc[i], h_tree)) # Prediction using simple tree
     return predictions
 
-# main function which reads file, splits the train and test data in feature data (x_...) and class column (y_...)
-# call id3 function with multiple max depth (running in loop).
-# calls the predict_example function on the test data and created decision tree
-# calls compute_error to get the test error
-# calls get_confusion_matrix to get confusion matrix and calculate accuracy
-# reports the results
-def main():
-    ##*******--Reading part (start to end) for Problem parts (a),(b),(c)---*******# Comment out when uncommenting reading part for part (d) below
-    ## start
-    trial_data_name = "monks-1"
-    try:
-        trial_data_name = sys.argv[1]  # use this line while triggering python script from command line ,
-                                   # pass data name (without the extension) as argument
-        if len(trial_data_name) == 0:
-            trial_data_name = "monks-1"  # please change this name to get the output file labelled with dataset name
-    except:
-        pass
-
-    df = pd.read_csv("./{}.train".format(trial_data_name), header=None)
-    y_train = df[0]
-    x_train = df.drop(1, 1)
-    print(x_train.head())
-
-    # df_tst = pd.read_csv("./{}.test".format(trial_data_name), header=None)  # to get train error
-    # # read the train file instead of test file
-    # y_test = df_tst[0]
-    # x_test = df_tst.drop(0, 1)
-    # ## end
-    #
-    # # #*******--Reading part for Problem parts (d)---*******# - Own preprocessed data (source: UCI repository) : uncomment from start to end
-    # ## start
-    # trial_data_name = "Adult_Income"  # please change this name to get the error file labelled with data name
-    # # df = pd.read_csv("C:\\MS CS\\Spring 2020\\ML\\PA\\SXC190070_PA1\\UCI_AdultIncome_Data\\train_set.csv")
-    # # y_train = df["Income_class"]
-    # # x_train = df.drop("Income_class", 1)
-    # # df_tst = pd.read_csv("C:\\MS CS\\Spring 2020\\ML\\PA\\SXC190070_PA1\\UCI_AdultIncome_Data\\test_set.csv")
-    # # y_test = df_tst["Income_class"]
-    # # x_test = df_tst.drop("Income_class", 1)
-    # ## end
-    #
-    # # Implemented Decision Tree - For Test error
-    # print("\n Running Decision Tree and evaluating results on Test data\n")
-    # total_error = 0
-    # y_data = y_test
-    # x_data = x_test
-    # error_dict = {}
-    # depth_range = 6;
-    # for i in range(1, depth_range):
-    #     tree = id3(x_train, y_train, max_depth=i)
-    #     y_pred = []
-    #     print("\n")
-    #     for example_index in range(len(x_data)): y_pred.append(predict_example(x_data.iloc[example_index], tree))
-    #     error = compute_error(y_data, y_pred)
-    #     error_dict[i] = round(error * 100, 2)
-    #     c_matrix = get_confusion_matrix(y_data, y_pred)
-    #     accuracy = (c_matrix[0][0] + c_matrix[1][1]) / (
-    #             c_matrix[0][0] + c_matrix[0][1] + c_matrix[1][0] + c_matrix[1][1])
-    #     total_error += error
-    #     print("===================== Depth:", i, " =====================")
-    #     print("Decision Tree: ", tree)
-    #     print("\n\n")
-    #     visualize(tree)
-    #     print("TP: ", c_matrix[0][0], " FN: ", c_matrix[0][1])
-    #     print("FP: ", c_matrix[1][0], " TN: ", c_matrix[1][1])
-    #     print("=========================\n")
-    #     print("Accuracy: ", round(accuracy * 100, 2))
-    #     print("Error: ", round(error * 100, 2))
-    # print("Average Error: ", round((total_error / depth_range) * 100, 2))
-    # error_output = "error_file_test_{}.csv".format(trial_data_name)
-    # (pd.DataFrame.from_dict(data=error_dict, orient='index').to_csv(error_output, header=False))
-
-    # ## Implemented Decision Tree - For Train error
-    # print("****************************************************************")
-    # print("\n Running Decision Tree and evaluating results on Train data\n")
-    # total_error = 0
-    # y_data = y_train
-    # x_data = x_train
-    # error_dict = {}
-    # for i in range(1, 3):
-    #     tree = id3(x_train, y_train, max_depth=i)
-    #     y_pred = []
-    #     print("\n")
-    #     for example_index in range(len(x_data)): y_pred.append(predict_example(x_data.iloc[example_index], tree))
-    #     error = compute_error(y_data, y_pred)
-    #     error_dict[i] = round(error * 100, 2)
-    #     c_matrix = get_confusion_matrix(y_data, y_pred)
-    #     accuracy = (c_matrix[0][0] + c_matrix[1][1]) / (
-    #             c_matrix[0][0] + c_matrix[0][1] + c_matrix[1][0] + c_matrix[1][1])
-    #     total_error += error
-    #
-    #     print("===================== Depth:", i, " =====================")
-    #     print("Decision Tree: ", tree)
-    #     print("\n\n")
-    #     visualize(tree)
-    #     print("TP: ", c_matrix[0][0], " FN: ", c_matrix[0][1])
-    #     print("FP: ", c_matrix[1][0], " TN: ", c_matrix[1][1])
-    #     print("=========================\n")
-    #     print("Accuracy: ", round(accuracy * 100, 2))
-    #     print("Error: ", round(error * 100, 2))
-    # print("Average Error: ", round((total_error / 10) * 100, 2))
-    # error_output = "C:\\MS CS\\Spring 2020\\ML\\PA\\\SXC190070_PA1\\output\\error_file_train_{}.csv".format(trial_data_name)
-    # (pd.DataFrame.from_dict(data=error_dict, orient='index').to_csv(error_output, header=False))
-
-    ## Below code is for part(c) -Scikit Learn -Uncomment the below part from start to end ( the reading part is same as
-    ## for part (a) and part (b)
-    ## start
-    # print("Below is the scikit learn decision tree output for {} data".format(trial_data_name))
-    # clf = sk_tree.DecisionTreeClassifier()
-    # classifier = clf.fit(x_train, y_train)
-    # disp = confusion_matrix(classifier.predict(x_test), y_test)
-    # print("\n",disp)
-    # graph_data = sk_tree.export_graphviz(classifier, out_file=None)
-    # graph = graphviz.Source(graph_data)
-    # graph.render("C:\\MS CS\\Spring 2020\\ML\\PA\\\SXC190070_PA1\\output\\decision_tree1")
-    ## end
-
 # The main execution of the assignment begins here
-def pro_assign_2_bagging(depths=[], trees=[]):
+def own_bagging(depths=[], trees=[]):
     data = read_data("mushroom")
     train_df = data[0]
     test_x = data[1]
@@ -473,14 +398,13 @@ def pro_assign_2_bagging(depths=[], trees=[]):
         for tree_len in trees:
             # Send the training data to the bagging algorithm
             all_trees = bagging(train_df, class_column=1, max_depth=depth, num_trees=tree_len)
-
             # Predict the test set with all the trees
             predictions = predict_test_set(test_x, type="bagging_tree", h_ens=all_trees)
             print_report(predictions, test_y, depth=depth, trees=tree_len)
 
 # The main execution of the assignment begins here
 def own_boosting(depths=[], trees=[]):
-    data_set_name = "monks-1"
+    data_set_name = "mushroom"
     data_columns_to_drop = []
     data_class_column = 1
 
@@ -510,7 +434,7 @@ def own_boosting(depths=[], trees=[]):
 
 # Scikit learn bagging
 def scikit_bagging(depths=[], trees=[]):
-    data = read_data("monks-2")
+    data = read_data("mushroom")
     train_df = data[0]
     test_x = data[1]
     test_y = data[2]
@@ -524,7 +448,7 @@ def scikit_bagging(depths=[], trees=[]):
 
 # Scikit learn boosting
 def scikit_boosting(depths=[], stumps=[]):
-    data = read_data("monks-1")
+    data = read_data("mushroom")
     train_df = data[0]
     test_x = data[1]
     test_y = data[2]
@@ -562,10 +486,8 @@ def read_data(data_set_name, data_class_column=1, data_columns_to_drop=[]):
     return (train_df, test_df, test_y)
 
 if __name__ == "__main__":
-    # main()
-    # pro_assign_2()
-    # pro_assign_2_bagging(depths=[3,5],trees=[10,20])
-    own_boosting([3,5], [20,40])
+    own_bagging(depths=[3,5],trees=[10,20])
+    # own_boosting([1,2], [20,40])
     # scikit_bagging([3,5], [10,20])
     # scikit_boosting([1,2], [20,40])
 
