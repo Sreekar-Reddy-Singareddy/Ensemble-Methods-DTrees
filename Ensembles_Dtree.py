@@ -1,17 +1,27 @@
+import concurrent
+from datetime import datetime
+import multiprocessing as mp
 import numpy as np
 import statistics as st
 import time
 import pandas as pd
 import math
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 from sklearn import tree as sk_tree
 from sklearn.metrics import confusion_matrix
-import graphviz
+# import graphviz
 import sys
 import random
 from sklearn.tree import  DecisionTreeClassifier
 from sklearn.ensemble import BaggingClassifier
 from sklearn.ensemble import AdaBoostClassifier
+import threading as THRD
+import os
+
+manager = mp.Manager()
+mutinfo = manager.dict()
+global_df = None
+cpu_cores = os.cpu_count()
 
 # ==== Project Team ====
 # SXS190008 - Sreekar
@@ -38,27 +48,6 @@ def partition(x):
 # if proportion of one class in a split subset is 0, return 0 for that entropy ( homogenous class)
 # else calculate the entropy  - Summation(Pi*log(Pi) (i=0,1)
 # returns value to the mutual_information function
-# def entropy(y, dist=None):
-#     if len(y) == 0:
-#         return 0
-#     else:
-#         p0 = p1 = 0
-#         if dist is None:
-#             p0 = len([c for c in y if c == 0]) / len(y)
-#             p1 = 1 - p0
-#         else:
-#             for index in y.index:
-#                 if y[index] == 0:
-#                     p0 += dist[index]
-#                 else:
-#                     p1 += dist[index]
-#             p0 = p0/(p0+p1)
-#             p1 = 1 - p0
-#
-#         if p0 == 0.0 or p0 == 1.0:
-#             return 0
-#         else:
-#             return -((p0 * math.log(p0, 2)) + (p1 * math.log(p1, 2)))
 def entropy(y, dist=None):
     if len(y) == 0:
         return 0
@@ -83,15 +72,16 @@ def entropy(y, dist=None):
 # 2. receives the present subset of the data, on which entropy and mutual information is to be evaluated
 # 3. receives entropy before and after  binary split, calculates weighted entropy after split
 # 4. finally subtracts before - weighted entropy to return mutual information
-def mutual_information(indices, df, hasDist):
+def mutual_information(key_pair, indices, hasDist):
+
     e_root = 0
     if hasDist:
-        e_root = entropy(df['class'], dist=df["distribution"])
+        e_root = entropy(global_df['class'], dist=global_df["distribution"])
     else :
-        e_root = entropy(df['class'])
+        e_root = entropy(global_df['class'])
 
-    df_true = df[df.index.isin(indices)]
-    df_false = df[~df.index.isin(indices)]
+    df_true = global_df[global_df.index.isin(indices)]
+    df_false = global_df[~global_df.index.isin(indices)]
 
     e_true = 0; e_false = 0
     if hasDist:
@@ -101,8 +91,11 @@ def mutual_information(indices, df, hasDist):
         e_true = entropy(df_true['class'])
         e_false = entropy(df_false['class'])
 
-    e_tot = (len(df_true) / len(df)) * e_true + (len(df_false) / len(df)) * e_false
-    return e_root - e_tot
+    e_tot = (len(df_true) / len(global_df)) * e_true + (len(df_false) / len(global_df)) * e_false
+    mi = e_root - e_tot
+    mutinfo[key_pair] = mi
+    # print("In MI {} -> {}".format(key_pair, mi))
+    # print(mutinfo)
 
 # dectree: this is main binary decision tree recursion implementation code
 # terminal conditions are following ID3 algorithm:
@@ -112,16 +105,28 @@ def mutual_information(indices, df, hasDist):
 #     -if no data is left to be split, return prior to split mode of class ( don't recursively call anymore)
 # final output is a nested dictionary representing the decision tree
 def dectree(df, dict, depth, hasDist):
+    # print("Unique: ",len(df['class'].unique()))
     if len(dict.keys()) == 0 or len(df['class'].unique()) == 1 or depth == 0:
         if len(df.loc[df['class'] == 1]) >= len(df.loc[df['class'] == 0]):
             return 1
         else:
             return 0
     else:
-        mutinfo = {}
+        global mutinfo
+        global global_df
+        mutinfo.clear()
+        global_df = df
+        args = []
+
+        # start = datetime.now()
         for k in dict.keys():
+            # print(k)
             node = dict[k]
-            mutinfo[k] = mutual_information(node, df, hasDist)
+            args.append((k, node, hasDist))
+
+        processes = mp.Pool(cpu_cores)
+        processes.starmap(mutual_information, args)
+
         splitnode = ()
         Gain = 0
         for k in mutinfo.keys():
@@ -130,6 +135,7 @@ def dectree(df, dict, depth, hasDist):
                 splitnode = k
         feature = splitnode[0]
         value = splitnode[1]
+        # print("Splitnode: ", splitnode)
         dict.pop(splitnode)
         depth -= 1
         if len(df.loc[df[feature] == value]) == 0:
@@ -149,6 +155,7 @@ def dectree(df, dict, depth, hasDist):
         l_tuple = (feature, value, True)
         r_tuple = (feature, value, False)
         node_dict = {l_tuple: left_branch, r_tuple: right_branch}
+        # print("Tree Partial: ", node_dict)
         return node_dict
 
 # ID3 function -this is the controlling function for the decision tree
@@ -262,6 +269,7 @@ def bagging (x, max_depth, num_trees, class_column=1):
     all_trees = []
     for bootstrap in bootstraps:
         tree_b = id3(bootstrap[0], bootstrap[1], max_depth=max_depth)
+        print(tree_b)
         weight_b = 1 # This is set as 1 because all trees are independent in bagging
         all_trees.append((weight_b, tree_b))
     return all_trees
@@ -389,11 +397,12 @@ def predict_test_set(test_x, type, h_ens=[], h_tree=None):
 
 # The main execution of the assignment begins here
 def own_bagging(depths=[], trees=[]):
-    data = read_data("mushroom")
+    data = read_data("audio", data_class_column=1)
     train_df = data[0]
     test_x = data[1]
     test_y = data[2]
 
+    start = datetime.now()
     for depth in depths:
         for tree_len in trees:
             # Send the training data to the bagging algorithm
@@ -401,6 +410,8 @@ def own_bagging(depths=[], trees=[]):
             # Predict the test set with all the trees
             predictions = predict_test_set(test_x, type="bagging_tree", h_ens=all_trees)
             print_report(predictions, test_y, depth=depth, trees=tree_len)
+    end = datetime.now()
+    print("Time Elapsed: {}".format(end - start))
 
 # The main execution of the assignment begins here
 def own_boosting(depths=[], trees=[]):
@@ -434,7 +445,7 @@ def own_boosting(depths=[], trees=[]):
 
 # Scikit learn bagging
 def scikit_bagging(depths=[], trees=[]):
-    data = read_data("mushroom")
+    data = read_data("monks-1")
     train_df = data[0]
     test_x = data[1]
     test_y = data[2]
@@ -475,8 +486,16 @@ def read_data(data_set_name, data_class_column=1, data_columns_to_drop=[]):
     test_data_path = "./data/{}.test".format(data_set_name)
     train_df = pd.read_csv(train_data_path, delimiter=",", header=None)
     test_df = pd.read_csv(test_data_path, delimiter=",", header=None)
+    # del train_df[0]
+    # del test_df[0]
+    # train_df = train_df.drop(0)
+    # test_df = test_df.drop(0)
+    # train_df.apply(pd.to_numeric)
+    # test_df.apply(pd.to_numeric)
     test_y = list(test_df[data_class_column - 1])
     del test_df[data_class_column - 1]
+
+    # print(train_df)
 
     # Drop the unwanted columns
     for c in data_columns_to_drop:
@@ -486,6 +505,7 @@ def read_data(data_set_name, data_class_column=1, data_columns_to_drop=[]):
     return (train_df, test_df, test_y)
 
 if __name__ == "__main__":
+    print("Running model on {} processor cores.".format(cpu_cores))
     own_bagging(depths=[3,5],trees=[10,20])
     # own_boosting([1,2], [20,40])
     # scikit_bagging([3,5], [10,20])
